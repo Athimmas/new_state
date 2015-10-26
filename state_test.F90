@@ -5,13 +5,30 @@ program state_dummy
       use omp_lib
 
 implicit none
+ 
+      integer (int_kind) k,this_block  
+      
+      real (r8), dimension(nx_block,ny_block,km,3) :: TMIX, TRCR  
+
+      real (r8), dimension(nx_block,ny_block,km) :: RHOK1 
+
+      !integer (int_kind) :: &
+      !k=1 ,this_block=1
+
+      call state(k,1,TRCR(:,:,:,1), TRCR(:,:,:,2), this_block, RHOFULL=RHOK1) 
+
+contains
+
+      subroutine state(k, kk, TEMPK, SALTK, this_block, RHOOUT, RHOFULL, DRHODT, DRHODS)
+
+      implicit none 
 
       integer (int_kind), parameter :: &
       nx_block = 84, & 
       ny_block = 196, &
       km = 60
 
-      integer (int_kind) i,j  
+      integer (int_kind) i,j,this_block  
 
       real (r8) start_time, end_time
 
@@ -47,18 +64,18 @@ implicit none
       mwjfdp3s0t1 =  -1.27934137e-17_r8
  
 
-      integer (int_kind) :: & !,intent(in) :: &
+      integer (int_kind) ,intent(in) :: &
       k,                    &! depth level index
       kk                     ! level to which water is adiabatically displaced
 
-      real (r8), dimension(nx_block,ny_block,km) :: & !, optional, intent(out) :: & 
+      real (r8), dimension(nx_block,ny_block,km), optional, intent(out) :: & 
       RHOOUT,  &! perturbation density of water
       RHOFULL, &! full density of water
       DRHODT,  &! derivative of density with respect to temperature
       DRHODS    ! derivative of density with respect to salinity
 
 
-      real (r8), dimension(nx_block,ny_block,km) :: & !,intent(in) :: & 
+      real (r8), dimension(nx_block,ny_block,km), intent(in) :: & 
       TEMPK,             &! temperature at level k
       SALTK,             &! salinity    at level k
       TQ,SQ,             &! adjusted T,S
@@ -97,18 +114,12 @@ implicit none
       !*** first calculate numerator of MWJF density [P_1(S,T,p)]
       !***
 
-      mwjfnums0t0 = mwjfnp0s0t0 + p*(mwjfnp1s0t0 + p*mwjfnp2s0t0)
       mwjfnums0t1 = mwjfnp0s0t1 
-      mwjfnums0t2 = mwjfnp0s0t2 + p*(mwjfnp1s0t2 + p*mwjfnp2s0t2)
       mwjfnums0t3 = mwjfnp0s0t3
-      mwjfnums1t0 = mwjfnp0s1t0 + p*mwjfnp1s1t0
       mwjfnums1t1 = mwjfnp0s1t1
       mwjfnums2t0 = mwjfnp0s2t0
 
-      mwjfdens0t0 = mwjfdp0s0t0 + p*mwjfdp1s0t0
-      mwjfdens0t1 = mwjfdp0s0t1 + p**3 * mwjfdp3s0t1
       mwjfdens0t2 = mwjfdp0s0t2
-      mwjfdens0t3 = mwjfdp0s0t3 + p**2 * mwjfdp2s0t3
       mwjfdens0t4 = mwjfdp0s0t4
       mwjfdens1t0 = mwjfdp0s1t0
       mwjfdens1t1 = mwjfdp0s1t1
@@ -116,56 +127,73 @@ implicit none
       mwjfdensqt0 = mwjfdp0sqt0
       mwjfdensqt2 = mwjfdp0sqt2
 
+      mwjfnums0t0 = mwjfnp0s0t0 + p*(mwjfnp1s0t0 + p*mwjfnp2s0t0)
+      mwjfnums0t2 = mwjfnp0s0t2 + p*(mwjfnp1s0t2 + p*mwjfnp2s0t2)
+      mwjfnums1t0 = mwjfnp0s1t0 + p*mwjfnp1s1t0
+     
+      mwjfdens0t0 = mwjfdp0s0t0 + p*mwjfdp1s0t0
+      mwjfdens0t1 = mwjfdp0s0t1 + p**3 * mwjfdp3s0t1
+      mwjfdens0t3 = mwjfdp0s0t3 + p**2 * mwjfdp2s0t3 
+
       start_time = omp_get_wtime()
 
       do k=1,km
       do j=1,ny_block
       do i=1,nx_block
       TQ(i,j,k) = min(TEMPK(i,j,k),tmax)
-      TQ(i,j,k) = max(TQ,tmin)
-      SQ = min(SALTK,smax)
-      SQ = max(SQ,smin)
+      TQ(i,j,k) = max(TQ(i,j,k),tmin)
+      SQ(i,j,k) = min(SALTK(i,j,k),smax)
+      SQ(i,j,k) = max(SQ(i,j,k),smin)
 
       p   = c10*pressz(kk)
 
-      SQ  = c1000*SQ
-      SQR = sqrt(SQ)
+      SQ(i,j,k)  = c1000 * SQ(i,j,k)
+      SQR(i,j,k) = sqrt( SQ(i,j,k) )
 
-      WORK1 = mwjfnums0t0 + TQ * (mwjfnums0t1 + TQ * (mwjfnums0t2 + &
-              mwjfnums0t3 * TQ)) + SQ * (mwjfnums1t0 +              &
-              mwjfnums1t1 * TQ + mwjfnums2t0 * SQ)
+      WORK1(i,j,k) = mwjfnums0t0 + TQ(i,j,k) * (mwjfnums0t1 + TQ(i,j,k) * (mwjfnums0t2 + &
+              mwjfnums0t3 * TQ(i,j,k) )) + SQ(i,j,k) * (mwjfnums1t0 +              &
+              mwjfnums1t1 * TQ(i,j,k) + mwjfnums2t0 * SQ(i,j,k) )
 
-      WORK2 = mwjfdens0t0 + TQ * (mwjfdens0t1 + TQ * (mwjfdens0t2 +    &
-           TQ * (mwjfdens0t3 + mwjfdens0t4 * TQ))) +                   &
-           SQ * (mwjfdens1t0 + TQ * (mwjfdens1t1 + TQ*TQ*mwjfdens1t3)+ &
-           SQR * (mwjfdensqt0 + TQ*TQ*mwjfdensqt2))
+      WORK2(i,j,k) = mwjfdens0t0 + TQ(i,j,k) * (mwjfdens0t1 + TQ(i,j,k) * (mwjfdens0t2 +    &
+           TQ(i,j,k) * (mwjfdens0t3 + mwjfdens0t4 * TQ(i,j,k) ))) +                   &
+           SQ(i,j,k) * (mwjfdens1t0 + TQ(i,j,k) * (mwjfdens1t1 + TQ(i,j,k) * TQ(i,j,k) *mwjfdens1t3)+ &
+           SQR(i,j,k) * (mwjfdensqt0 + TQ(i,j,k) * TQ(i,j,k) *mwjfdensqt2))
 
-      DENOMK = c1/WORK2
 
-         RHOOUT  = WORK1*DENOMK
+      DENOMK(i,j,k) = c1/WORK2(i,j,k)
 
-         RHOFULL = WORK1*DENOMK
+      if (present(RHOOUT)) then
+      RHOOUT(i,j,k)  = WORK1(i,j,k) * DENOMK(i,j,k)
+      endif 
 
-         WORK3 = &! dP_1/dT
-                 mwjfnums0t1 + TQ * (c2*mwjfnums0t2 +    &
-                 c3*mwjfnums0t3 * TQ) + mwjfnums1t1 * SQ
+      if (present(RHOFULL)) then
+      RHOFULL(i,j,k) = WORK1(i,j,k) * DENOMK(i,j,k)
+      endif
 
-         WORK4 = &! dP_2/dT
-                 mwjfdens0t1 + SQ * mwjfdens1t1 +               &
-                 TQ * (c2*(mwjfdens0t2 + SQ*SQR*mwjfdensqt2) +  &
-                 TQ * (c3*(mwjfdens0t3 + SQ * mwjfdens1t3) +    &
-                 TQ *  c4*mwjfdens0t4))
+      if(present(DRHODT))then 
+      WORK3(i,j,k) = &! dP_1/dT
+                 mwjfnums0t1 + TQ(i,j,k) * (c2*mwjfnums0t2 +    &
+                 c3*mwjfnums0t3 * TQ(i,j,k)) + mwjfnums1t1 * SQ(i,j,k)
 
-         DRHODT = (WORK3 - WORK1*DENOMK*WORK4)*DENOMK
+      WORK4(i,j,k) = &! dP_2/dT
+                 mwjfdens0t1 + SQ(i,j,k) * mwjfdens1t1 +               &
+                 TQ(i,j,k) * (c2*(mwjfdens0t2 + SQ(i,j,k) * SQR(i,j,k) * mwjfdensqt2) +  &
+                 TQ(i,j,k) * (c3*(mwjfdens0t3 + SQ(i,j,k) * mwjfdens1t3) +    &
+                 TQ(i,j,k) *  c4*mwjfdens0t4))
 
-         WORK3 = &! dP_1/dS
-                 mwjfnums1t0 + mwjfnums1t1 * TQ + c2*mwjfnums2t0 * SQ
+      DRHODT(i,j,k) = (WORK3(i,j,k) - WORK1(i,j,k) * DENOMK(i,j,k) * WORK4(i,j,k)) * DENOMK(i,j,k)
+      endif 
 
-         WORK4 = mwjfdens1t0 +   &! dP_2/dS
-                 TQ * (mwjfdens1t1 + TQ*TQ*mwjfdens1t3) +   &
-                 c1p5*SQR*(mwjfdensqt0 + TQ*TQ*mwjfdensqt2)
+      if(present(DRHODS))then
+      WORK3(i,j,k) = &! dP_1/dS
+                 mwjfnums1t0 + mwjfnums1t1 * TQ(i,j,k) + c2*mwjfnums2t0 * SQ(i,j,k)
 
-         DRHODS = (WORK3 - WORK1*DENOMK*WORK4)*DENOMK * c1000
+      WORK4(i,j,k) = mwjfdens1t0 +   &! dP_2/dS
+                 TQ(i,j,k) * (mwjfdens1t1 + TQ(i,j,k) * TQ(i,j,k) * mwjfdens1t3) +   &
+                 c1p5* SQR(i,j,k) * (mwjfdensqt0 + TQ(i,j,k) * TQ(i,j,k) *mwjfdensqt2)
+
+      DRHODS(i,j,k) = (WORK3(i,j,k) - WORK1(i,j,k) * DENOMK(i,j,k) * WORK4(i,j,k)) * DENOMK(i,j,k) * c1000
+      endif 
 
          enddo
          enddo
@@ -183,5 +211,8 @@ implicit none
          print *,sum(DRHODS)
          print *,sum(RHOFULL)
          print *,sum(RHOOUT)
+
+         end subroutine state  
+
 end program state_dummy
 
